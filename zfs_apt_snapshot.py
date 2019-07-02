@@ -13,6 +13,7 @@ Python 3.5.
 """
 
 import collections
+import datetime
 import functools
 import locale
 import os.path
@@ -181,9 +182,22 @@ def main(source):
         pkgs.append(pkg)
     filesystems = filesystems_for_packages(pkgs)
 
-    # TODO: in progress, create a snapshot name, create snapshot, etc
-    import pprint
-    pprint.pprint(filesystems)
+    # Choose a name for the snapshot
+    timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d-%H%M")
+    snapshot_name = "zfs-apt-snap_{}".format(timestamp)
+    # This mess of decode()+encode() is because there isn't a format() method
+    # for bytes.
+    filesystem_snapshots = [
+        "{}@{}".format(
+            f.decode(default_encoding),
+            snapshot_name)
+        .encode(default_encoding)
+        for f in filesystems
+    ]
+    # Create the snapshots
+    for snapshot in filesystem_snapshots:
+        print("Creating snapshot", snapshot)
+        create_snapshot(snapshot)
 
 
 if __name__ == "__main__":
