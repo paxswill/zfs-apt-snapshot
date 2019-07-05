@@ -1,0 +1,4 @@
+// Install this to /etc/apt/apt.conf.d/90apt-zfs-snapshot
+Dpkg::Pre-Install-Pkgs {
+	"/usr/local/sbin/zfs-apt-snapshot";
+};
