@@ -14,12 +14,16 @@ Python 3.5.
 
 import collections
 import datetime
+import enum
 import functools
 import locale
-import os.path
+import operator
+import os
+import pathlib
 import subprocess
 import sys
 
+import apt
 from apt.debfile import DebPackage
 try:
     import libzfs_core as zfs
@@ -136,51 +140,132 @@ def get_filesystems(*paths):
 def directories_for_package(pkg):
     """Return a list of the directories a package is modifying."""
     directories = set()
-    for path in pkg.filelist:
-        if path[-1] != "/":
-            dirname = os.path.dirname(path)
-            if dirname[0] != "/":
-                dirname = "/" + dirname
-            directories.add(dirname)
+    if hasattr(pkg, "filelist"):
+        # apt.debfile.DebPackage
+        path_strs = pkg.filelist
+    elif hasattr(pkg, "installed_files"):
+        # apt.Package
+        path_strs = pkg.installed_files
+    # Figure out the root path to add to relative paths
+    first_path = path_strs[0]
+    if first_path in {"./", "/.", "/"}:
+        path_prefix = pathlib.PurePosixPath("/")
+    paths = (
+        pathlib.PurePosixPath(p)
+        for p in path_strs
+        # Skip root directores and empty paths
+        if p not in {"./", "/.", "", "."}
+    )
+    for path in paths:
+        # Remove any parent directories in the set, as we only want leaf
+        # entries
+        if not path.is_absolute():
+            path = path_prefix / path
+        directories.difference_update(path.parents)
+        directories.add(path)
     return directories
 
 
-def filesystems_for_packages(pkgs):
+def filesystems_for_files(files):
     """Return a list of ZFS filesystems modified by the given packages."""
-    all_directories = set()
-    for pkg in pkgs:
-        all_directories.update(directories_for_package(pkg))
-
     filesystems = set()
-    # convert the directory list to a queue so we can put things at the end for
+    # convert the path list to a queue so we can put things at the end for
     # later processing
-    all_directories = collections.deque(all_directories)
-    while all_directories:
-        d = all_directories.popleft()
+    paths = collections.deque(files)
+    while paths:
+        path = paths.popleft()
         try:
-            f = get_filesystems(d)
-            filesystems.update(f)
+            # We need to convert the PurePath to a string for processing by the
+            # ZFS API.
+            filesystem = get_filesystems(str(path))
+            filesystems.update(filesystem)
         except ZFSListError:
             # If there's an error, the path probably doesn't exist yet, so find
             # the filesystem for the parent directory (and so on).
-            new_d = os.path.dirname(d)
-            if d != new_d:
-                all_directories.append(new_d)
+            if path.parent != path:
+                paths.append(path.parent)
             else:
                 raise
     return filesystems
 
 
+def get_files(stream):
+    """Reads the information stream and returns the directories being changed.
+
+    This supports versions 1, 2, and 3 of the information protocol.
+    """
+    packages = []
+    # First detect which version of the description protocol we're getting
+    line = stream.readline().strip()
+    # Doing this more complicated version checking to guard against a newer
+    # version being sent without supporting it.
+    version_prefix = "VERSION "
+    if line.startswith(version_prefix):
+        version = int(line[len(version_prefix):])
+    else:
+        version = 1
+    # Check for unsupported versions
+    if not (1 <= version <= 3):
+        print(
+            (
+                "ERROR: Unsupported APT helper configuration protocol version "
+                "({})!"
+            ).format(version)
+        )
+        sys.exit(1)
+    if version == 1:
+        # handle the version 1 case first, it's simple
+        while line != "":
+            pkg = DebPackage(filename=line)
+            packages.append(pkg)
+            line = stream.readline().strip()
+    else:
+        line = stream.readline().strip()
+        # The first block is the APT configuration space, which is terminated
+        # with a blank line. We don't care about the info in there, so we skip
+        # it
+        while line != "":
+            line = stream.readline().strip()
+        line = stream.readline().strip()
+        # Versions 2 and 3 are very similar; version 3 adds a field for
+        # architecture.
+        if version == 2:
+            field_count = 5
+        elif version == 3:
+            field_count = 6
+        # Fields are space-delimited, in this order: package name, old version,
+        # change direction, new version, action, and if version 3,
+        # architecture. I recommend reading the apt.conf(5) man page for more
+        # details.
+        apt_cache = apt.Cache()
+        while line != "":
+            # I'm doing a reverse split on space to guard against possible
+            # quoting in the package name.
+            fields = line.rsplit(" ", maxsplit=(field_count - 1))
+            # We only care about the package name and action
+            pkg_name = fields[0]
+            action = fields[4]
+            # If the package is being removed or configured, `action` is
+            # `**REMOVE**` or `**CONFIGURE**` respectively. Otherwise it's the
+            # path to the package file being installed.
+            if action in {"**REMOVE**", "**CONFIGURE**"}:
+                package = apt_cache[pkg_name]
+            else:
+                package = DebPackage(filename=action)
+            packages.append(package)
+            line = stream.readline().strip()
+
+    return set(functools.reduce(
+        operator.or_,
+        (directories_for_package(pkg) for pkg in packages),
+        set()
+    ))
+
+
 def main(source):
     # Read the list of packages in
-    pkgs = []
-    while True:
-        pkg_path = source.readline().strip()
-        if pkg_path == "":
-            break
-        pkg = DebPackage(filename=pkg_path)
-        pkgs.append(pkg)
-    filesystems = filesystems_for_packages(pkgs)
+    paths = get_files(source)
+    filesystems = filesystems_for_files(paths)
 
     # Choose a name for the snapshot
     timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d-%H%M")
