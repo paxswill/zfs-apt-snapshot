@@ -286,5 +286,8 @@ def main(source):
 
 
 if __name__ == "__main__":
-    main(sys.stdin)
+    # If this environment variable is set, it's the file descriptor we're going
+    # to get the info from. If it's not present, use 0 for stdin.
+    input_stream = open(int(os.environ.get("APT_HOOK_INFO_FD", 0)), "r")
+    main(input_stream)
 
