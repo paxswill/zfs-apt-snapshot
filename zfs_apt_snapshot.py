@@ -281,7 +281,11 @@ def main(source):
     ]
     # Create the snapshots
     for snapshot in filesystem_snapshots:
-        print("Creating snapshot", snapshot)
+        print(
+            "Creating ZFS snapshot '{}'".format(
+                snapshot.decode(default_encoding)
+            )
+        )
         create_snapshot(snapshot)
 
 
