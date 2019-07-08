@@ -308,16 +308,23 @@ def get_files(stream):
             # I'm doing a reverse split on space to guard against possible
             # quoting in the package name.
             fields = line.rsplit(" ", maxsplit=(field_count - 1))
-            # We only care about the package name and action
-            pkg_name, *_, action = fields
+            # Pull out the fields we need.
+            pkg_name, installed_version, *_, action = fields
             # If the package is being removed or configured, `action` is
             # `**REMOVE**` or `**CONFIGURE**` respectively. Otherwise it's the
             # path to the package file being installed.
             if action in {"**REMOVE**", "**CONFIGURE**"}:
-                package = apt_cache[pkg_name]
+                cached_package = apt_cache[pkg_name]
+                packages.append(cached_package)
             else:
-                package = DebPackage(filename=action)
-            packages.append(package)
+                deb_package = DebPackage(filename=action)
+                packages.append(deb_package)
+                if installed_version != "-":
+                    # If we're upgrading from an old package, make sure to look
+                    # for those files that might be removed when the old
+                    # package is removed.
+                    cached_package = apt_cache[pkg_name]
+                    packages.append(cached_package)
             line = stream.readline().strip()
 
     return set(functools.reduce(
