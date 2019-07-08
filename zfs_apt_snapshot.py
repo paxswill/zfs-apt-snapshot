@@ -25,6 +25,7 @@ import sys
 
 import apt
 from apt.debfile import DebPackage
+# Try to use the libzfs_code library functions when possible
 try:
     import libzfs_core as zfs
     import libzfs_core.exceptions
@@ -32,6 +33,7 @@ except ImportError:
     _lzc_snapshot = None
     _lzc_snap = None
     _lzc_list_snaps = None
+    _lzc_get_props = None
 else:
     _lzc_snapshot = getattr(zfs, "lzc_snapshot", None)
     if not zfs.is_supported(_lzc_snapshot):
@@ -42,6 +44,9 @@ else:
     _lzc_list_snaps = getattr(zfs, "lzc_list_snaps", None)
     if not zfs.is_supported(_lzc_list_snaps):
         _lzc_list_snaps = None
+    _lzc_get_props = getattr(zfs, "lzc_get_props", None)
+    if not zfs.is_supported(_lzc_get_props):
+        _lzc_get_props = None
 
 
 # Get the current default locale early on
@@ -55,6 +60,9 @@ class SnapshotExists(SnapshotCreationError): pass
 
 
 class ZFSListError(Exception): pass
+
+
+class ZFSGetPropertiesError(Exception): pass
 
 
 def ensure_bytes(func):
@@ -104,6 +112,57 @@ if _lzc_list_snaps is not None:
 else:
     def list_snapshots(name):
         return _zfs_list(name, type_=b"snapshot")
+
+
+if _lzc_get_props is not None:
+    @ensure_bytes
+    def get_dataset_props(name):
+        try:
+            return _lzc_get_props(name)
+        except zfs.exceptions.ZFSError as e:
+            raise ZFSGetPropertiesError() from e
+else:
+    @ensure_bytes
+    def get_dataset_props(name):
+        args = [
+            b"zfs",
+            b"get",
+            b"-o",
+            b"property,value",
+            b"-p",
+            b"-H",
+            b"all",
+            name,
+        ]
+        ret = subprocess.run(
+            args,
+            check=False,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE
+        )
+        if ret.returncode != 0:
+            raise ZFSGetPropertiesError(ret.stderr)
+        else:
+            stdout = ret.stdout.strip()
+            properties = {}
+            for line in (l.strip() for l in ret.stdout.split(b"\n")):
+                if line == b"":
+                    # Skip blank lines (like at the end of the output).
+                    continue
+                name, value = line.split(b"\t")
+                # convert boolean vlues to Python bools. Not converting other
+                # types as blindly converting tings to ints and floats leads to
+                # problems later if you're not 100% sure whjat type they're
+                # supposed to be.
+                if value.lower() in {b"on", b"true"}:
+                    value = True
+                elif value.lower() in {b"off", b"false"}:
+                    value = False
+                # convert the name to a python str as it's a human-readable
+                # identifier
+                name = name.decode(default_encoding)
+                properties[name] = value
+            return properties
 
 
 @ensure_bytes
@@ -267,6 +326,13 @@ def main(source):
     paths = get_files(source)
     filesystems = filesystems_for_files(paths)
 
+    # Skip filesystems that have com.sun:auto-snapshot set to false
+    enabled_filesystems = set()
+    for fs in filesystems:
+        properties = get_dataset_props(fs)
+        if properties.get("com.sun:auto-snapshot", True):
+            enabled_filesystems.add(fs)
+
     # Choose a name for the snapshot
     timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d-%H%M")
     snapshot_name = "zfs-apt-snap_{}".format(timestamp)
@@ -277,7 +343,7 @@ def main(source):
             f.decode(default_encoding),
             snapshot_name)
         .encode(default_encoding)
-        for f in filesystems
+        for f in enabled_filesystems
     ]
     # Create the snapshots
     for snapshot in filesystem_snapshots:
