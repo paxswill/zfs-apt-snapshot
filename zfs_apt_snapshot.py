@@ -92,7 +92,7 @@ else:
     def create_snapshot(name):
         if isinstance(name, str):
             ret = subprocess.run(
-                [b"zfs", b"subprocess", name],
+                [b"zfs", b"snapshot", name],
                 check=False,
                 stderr=subprocess.STDOUT,
                 stdout=subprocess.PIPE
