@@ -286,12 +286,19 @@ def get_files(stream):
         while line != "":
             line = stream.readline().strip()
         line = stream.readline().strip()
-        # Versions 2 and 3 are very similar; version 3 adds a field for
-        # architecture.
+        # Versions 2 and 3 are very similar; version 3 adds two fields for
+        # architecture after both version fields. Fields are space-delimited in
+        # both versions.
         if version == 2:
+            # In this case, fields are:
+            # package name, old version, change direction, new version, action.
             field_count = 5
         elif version == 3:
-            field_count = 6
+            # In this case the fields are:
+            # package name, old version, old version arch, old version
+            # multi-arch type, change direction, new version, new version arch,
+            # new version multi-arch type, action.
+            field_count = 9
         # Fields are space-delimited, in this order: package name, old version,
         # change direction, new version, action, and if version 3,
         # architecture. I recommend reading the apt.conf(5) man page for more
@@ -302,8 +309,7 @@ def get_files(stream):
             # quoting in the package name.
             fields = line.rsplit(" ", maxsplit=(field_count - 1))
             # We only care about the package name and action
-            pkg_name = fields[0]
-            action = fields[4]
+            pkg_name, *_, action = fields
             # If the package is being removed or configured, `action` is
             # `**REMOVE**` or `**CONFIGURE**` respectively. Otherwise it's the
             # path to the package file being installed.
