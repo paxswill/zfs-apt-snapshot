@@ -12,6 +12,7 @@ the the scripting interface if it isn't. The Python APT bindings are required
 Python 3.5.
 """
 
+import argparse
 import collections
 import datetime
 import enum
@@ -334,17 +335,42 @@ def get_files(stream):
     ))
 
 
+def get_config():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Create ZFS snapshots before changing packages through APT."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_option(
+        "--ignore-auto-snapshot",
+        action="store_false",
+        dest="respect_auto_snapshot",
+        help=(
+            "Ignore the com.sun:auto-snapshot property. Otherwise, those "
+            "datasets with this property set to false are not snapshotted by "
+            "this script. Datasets without a value for this property are "
+            "treated as if it was true."
+        )
+    )
+    args = parser.parse_args()
+
+
 def main(source):
+    args = get_config()
     # Read the list of packages in
     paths = get_files(source)
     filesystems = filesystems_for_files(paths)
 
-    # Skip filesystems that have com.sun:auto-snapshot set to false
-    enabled_filesystems = set()
-    for fs in filesystems:
-        properties = get_dataset_props(fs)
-        if properties.get("com.sun:auto-snapshot", True):
-            enabled_filesystems.add(fs)
+    if args.respect_auto_snapshot:
+        # Skip filesystems that have com.sun:auto-snapshot set to false
+        enabled_filesystems = set()
+        for fs in filesystems:
+            properties = get_dataset_props(fs)
+            if properties.get("com.sun:auto-snapshot", True):
+                enabled_filesystems.add(fs)
+    else:
+        enabled_filesystems = filesystems
 
     # Choose a name for the snapshot
     timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d-%H%M")
