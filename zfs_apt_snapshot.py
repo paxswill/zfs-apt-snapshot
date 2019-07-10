@@ -18,6 +18,7 @@ import datetime
 import enum
 import functools
 import locale
+import logging
 import operator
 import os
 import pathlib
@@ -52,6 +53,10 @@ else:
 
 # Get the current default locale early on
 default_encoding = locale.getpreferredencoding()
+
+
+log = logging.getLogger("zfs_apt_snapshot")
+logging.basicConfig()
 
 
 class APTSnapshotError(Exception):
@@ -111,8 +116,13 @@ else:
     @ensure_bytes
     def create_snapshot(name):
         if isinstance(name, str):
+            args = [b"zfs", b"snapshot", name],
+            log.debug(
+                "Running external command `%s`",
+                b" ".join(args).decode(default_encoding)
+            )
             ret = subprocess.run(
-                [b"zfs", b"snapshot", name],
+                args,
                 check=False,
                 stderr=subprocess.STDOUT,
                 stdout=subprocess.PIPE
@@ -154,6 +164,10 @@ else:
             b"all",
             name,
         ]
+        log.debug(
+            "Running external command `%s`",
+            b" ".join(args).decode(default_encoding)
+        )
         ret = subprocess.run(
             args,
             check=False,
@@ -198,6 +212,10 @@ def _zfs_list(*names, type_=None):
         ))
 
     args = [b"zfs", b"list", b"-H", b"-t", type_, b"-o", b"name", *names]
+    log.debug(
+        "Running external command `%s`",
+        b" ".join(args).decode(default_encoding)
+    )
     ret = subprocess.run(
         args,
         check=False,
@@ -221,11 +239,14 @@ def directories_for_package(pkg):
     directories = set()
     if hasattr(pkg, "filelist"):
         # apt.debfile.DebPackage
+        log.debug("Getting files from .deb package '%s'.", pkg)
         path_strs = pkg.filelist
     elif hasattr(pkg, "installed_files"):
         # apt.Package
+        log.debug("Getting files from cached APT package '%s'.", pkg)
         path_strs = pkg.installed_files
     # Figure out the root path to add to relative paths
+    log.debug("Paths for %s: %s", pkg, path_strs)
     first_path = path_strs[0]
     if first_path in {"./", "/.", "/"}:
         path_prefix = pathlib.PurePosixPath("/")
@@ -292,9 +313,11 @@ def get_files(stream):
             ).format(version)
         )
         sys.exit(1)
+    log.debug("Parsing version %d of APT hook protocol.", version)
     if version == 1:
         # handle the version 1 case first, it's simple
         while line != "":
+            log.debug("Hook protocol line: '%s'", line)
             pkg = DebPackage(filename=line)
             packages.append(pkg)
             line = stream.readline().strip()
@@ -303,7 +326,9 @@ def get_files(stream):
         # The first block is the APT configuration space, which is terminated
         # with a blank line. We don't care about the info in there, so we skip
         # it
+        log.debug("Skipping APT configuration lines.")
         while line != "":
+            log.debug("Hook protocol line: '%s'", line)
             line = stream.readline().strip()
         line = stream.readline().strip()
         # Versions 2 and 3 are very similar; version 3 adds two fields for
@@ -325,9 +350,11 @@ def get_files(stream):
         # details.
         apt_cache = apt.Cache()
         while line != "":
+            log.debug("Hook protocol line: '%s'", line)
             # I'm doing a reverse split on space to guard against possible
             # quoting in the package name.
             fields = line.rsplit(" ", maxsplit=(field_count - 1))
+            log.debug("Hook fields: %s", fields)
             # Pull out the fields we need.
             pkg_name, installed_version, *_, action = fields
             # If the package is being removed or configured, `action` is
@@ -372,12 +399,19 @@ def get_config():
             "treated as if it was true."
         )
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging."
+    )
     args = parser.parse_args()
     return args
 
 
 def main(source):
     args = get_config()
+    if args.verbose:
+        log.level = logging.DEBUG
     # Read the list of packages in
     paths = get_files(source)
     filesystems = filesystems_for_files(paths)
