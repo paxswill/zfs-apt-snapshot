@@ -342,7 +342,7 @@ def get_config():
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_option(
+    parser.add_argument(
         "--ignore-auto-snapshot",
         action="store_false",
         dest="respect_auto_snapshot",
@@ -354,6 +354,7 @@ def get_config():
         )
     )
     args = parser.parse_args()
+    return args
 
 
 def main(source):
