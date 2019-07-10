@@ -362,7 +362,13 @@ def get_files(stream):
             # path to the package file being installed.
             if action in {"**REMOVE**", "**CONFIGURE**"}:
                 cached_package = apt_cache[pkg_name]
-                packages.append(cached_package)
+                if cached_package.is_installed:
+                    # Only look at packages being reconfigured after they've
+                    # been installed. If they aren't installed yet, the package
+                    # from the apt cache won't have any files to list (and the
+                    # package is probably being installed anyways in this run
+                    # anyways).
+                    packages.append(cached_package)
             else:
                 deb_package = DebPackage(filename=action)
                 packages.append(deb_package)
