@@ -97,7 +97,10 @@ def ensure_bytes(func):
     def inner(*args, **kwargs):
         if "name" in kwargs and isinstance(kwargs["name"], str):
             kwargs["name"] = kwargs["name"].encode(default_encoding)
-        args = [a.encode(default_encoding) if isinstance(a, str) else a for a in args]
+        args = [
+            a.encode(default_encoding) if isinstance(a, str) else a
+            for a in args
+        ]
         return func(*args, **kwargs)
     return inner
 
