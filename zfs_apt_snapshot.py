@@ -54,16 +54,35 @@ else:
 default_encoding = locale.getpreferredencoding()
 
 
-class SnapshotCreationError(Exception): pass
+class APTSnapshotError(Exception):
+
+    def __init__(self, *args, subprocess_return=None, **kwargs):
+        if subprocess_return is not None:
+            self.subprocess_return = subprocess_return
+            args = b" ".join(self.subprocess_return.args)
+            if self.subprocess_return.stderr:
+                error_output = self.subprocess_return.stderr
+            else:
+                error_output = self.subprocess_return.stdout
+            message = "Error running command `{}`: {}".format(
+                args.decode(default_encoding),
+                error_output
+            )
+            super().__init__(message, *args, **kwargs)
+        else:
+            super().__init__(*args, **kwargs)
+
+
+class SnapshotCreationError(APTSnapshotError): pass
 
 
 class SnapshotExists(SnapshotCreationError): pass
 
 
-class ZFSListError(Exception): pass
+class ZFSListError(APTSnapshotError): pass
 
 
-class ZFSGetPropertiesError(Exception): pass
+class ZFSGetPropertiesError(APTSnapshotError): pass
 
 
 def ensure_bytes(func):
@@ -100,7 +119,7 @@ else:
             )
             if ret.returncode != 0:
                 # TODO do further checking about what kind of error this is
-                raise SnapshotCreationError(ret.stdout)
+                raise SnapshotCreationError(subprocess_return=ret)
 
 
 if _lzc_list_snaps is not None:
@@ -142,7 +161,7 @@ else:
             stdout=subprocess.PIPE
         )
         if ret.returncode != 0:
-            raise ZFSGetPropertiesError(ret.stderr)
+            raise ZFSGetPropertiesError(subprocess_return=ret)
         else:
             stdout = ret.stdout.strip()
             properties = {}
@@ -186,7 +205,7 @@ def _zfs_list(*names, type_=None):
         stdout=subprocess.PIPE
     )
     if ret.returncode != 0:
-        raise ZFSListError(ret.stderr)
+        raise ZFSListError(subprocess_return=ret)
     else:
         # strip() the output to trim trailing newlines
         return ret.stdout.strip().split(b"\n")
