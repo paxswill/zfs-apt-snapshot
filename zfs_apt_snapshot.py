@@ -56,7 +56,10 @@ default_encoding = locale.getpreferredencoding()
 
 
 log = logging.getLogger("zfs_apt_snapshot")
-logging.basicConfig()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(filename)s: %(message)s"
+)
 
 
 class APTSnapshotError(Exception):
@@ -242,11 +245,11 @@ def directories_for_package(pkg):
     directories = set()
     if hasattr(pkg, "filelist"):
         # apt.debfile.DebPackage
-        log.debug("Getting files from .deb package '%s'.", pkg)
+        log.info("Getting paths from .deb package '%s'.", pkg.pkgname)
         path_strs = pkg.filelist
     elif hasattr(pkg, "installed_files"):
         # apt.Package
-        log.debug("Getting files from cached APT package '%s'.", pkg)
+        log.info("Getting paths from cached APT package '%s'.", pkg.name)
         path_strs = pkg.installed_files
     # Figure out the root path to add to relative paths
     log.debug("Paths for %s: %s", pkg, path_strs)
@@ -284,7 +287,7 @@ def filesystems_for_files(files):
             filtered_files.remove(pure_path)
             filtered_files.add(concrete_path)
 
-    log.debug("Filtered %d files down to %d", len(files), len(filtered_files))
+    log.info("Filtered %d paths down to %d", len(files), len(filtered_files))
     # convert the path list to a queue so we can put things at the end for
     # later processing
     paths = collections.deque(filtered_files)
@@ -322,7 +325,7 @@ def get_files(stream):
         version = 1
     # Check for unsupported versions
     if not (1 <= version <= 3):
-        print(
+        log.error(
             (
                 "ERROR: Unsupported APT helper configuration protocol version "
                 "({})!"
@@ -462,11 +465,8 @@ def main(source):
     ]
     # Create the snapshots
     for snapshot in filesystem_snapshots:
-        print(
-            "Creating ZFS snapshot '{}'".format(
-                snapshot.decode(default_encoding)
-            )
-        )
+        log.info("Creating ZFS snapshot '%s'",
+                 snapshot.decode(default_encoding))
         create_snapshot(snapshot)
 
 
