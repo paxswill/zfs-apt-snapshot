@@ -272,9 +272,22 @@ def directories_for_package(pkg):
 def filesystems_for_files(files):
     """Return a list of ZFS filesystems modified by the given packages."""
     filesystems = set()
+    filtered_files = set(files)
+    for pure_path in files:
+        concrete_path = pathlib.PosixPath(pure_path)
+        # If a path doesn't exist yet, or doesn't point to a directory, use the
+        # parent directory.
+        # Change paths that don't exist yet into the closest parent that does
+        while not concrete_path.exists() and not concrete_path.is_dir():
+            concrete_path = concrete_path.parent
+        if concrete_path != pure_path:
+            filtered_files.remove(pure_path)
+            filtered_files.add(concrete_path)
+
+    log.debug("Filtered %d files down to %d", len(files), len(filtered_files))
     # convert the path list to a queue so we can put things at the end for
     # later processing
-    paths = collections.deque(files)
+    paths = collections.deque(filtered_files)
     while paths:
         path = paths.popleft()
         try:
