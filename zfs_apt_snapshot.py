@@ -313,7 +313,7 @@ def get_files(stream):
 
     This supports versions 1, 2, and 3 of the information protocol.
     """
-    packages = []
+    directories = set()
     # First detect which version of the description protocol we're getting
     line = stream.readline().strip()
     # Doing this more complicated version checking to guard against a newer
@@ -338,7 +338,9 @@ def get_files(stream):
         while line != "":
             log.debug("Hook protocol line: '%s'", line)
             pkg = DebPackage(filename=line)
-            packages.append(pkg)
+            # Keep the package objects around only as long as they're needed,
+            # otherwise you'll open too many files.
+            directories.update(directories_for_package(pkg))
             line = stream.readline().strip()
     else:
         line = stream.readline().strip()
@@ -387,23 +389,19 @@ def get_files(stream):
                     # from the apt cache won't have any files to list (and the
                     # package is probably being installed anyways in this run
                     # anyways).
-                    packages.append(cached_package)
+                    directories.update(directories_for_package(cached_package))
             else:
                 deb_package = DebPackage(filename=action)
-                packages.append(deb_package)
+                directories.update(directories_for_package(deb_package))
                 if installed_version != "-":
                     # If we're upgrading from an old package, make sure to look
                     # for those files that might be removed when the old
                     # package is removed.
                     cached_package = apt_cache[pkg_name]
-                    packages.append(cached_package)
+                    directories.update(directories_for_package(cached_package))
             line = stream.readline().strip()
 
-    return set(functools.reduce(
-        operator.or_,
-        (directories_for_package(pkg) for pkg in packages),
-        set()
-    ))
+    return directories
 
 
 def get_config():
