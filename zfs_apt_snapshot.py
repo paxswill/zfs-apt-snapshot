@@ -259,7 +259,7 @@ def directories_for_package(pkg):
     paths = (
         pathlib.PurePosixPath(p)
         for p in path_strs
-        # Skip root directores and empty paths
+        # Skip root directories and empty paths
         if p not in {"./", "/.", "", "."}
     )
     for path in paths:
