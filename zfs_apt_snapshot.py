@@ -104,6 +104,7 @@ class ZFSGetPropertiesError(APTSnapshotError): pass
 
 
 SNAPSHOT_PREFIX = "zfs-apt-snap"
+SNAPSHOT_PREFIX_BYTES = SNAPSHOT_PREFIX.encode(default_encoding)
 SNAPSHOT_TIMESTAMP_FORMAT = "%Y-%m-%d-%H%M"
 
 
@@ -275,6 +276,25 @@ def get_filesystems(*paths):
     return _zfs_list(*paths, type_=b"filesystem")
 
 
+@ensure_bytes
+def is_apt_snapshot(snapshot_name):
+    """Function for checking if a snapshot was created by this tool."""
+    if b"@" in snapshot_name:
+        _, bare_snapshot_name = snapshot_name.split(b"@")
+    else:
+        bare_snapshot_name = snapshot_name
+    return bare_snapshot_name.startswith(SNAPSHOT_PREFIX_BYTES)
+
+
+def list_apt_snapshots():
+    """List all snapshots that were created by this tool."""
+    # No path argument to _zfs_list() means get everything (by default as of
+    # 0.8.0 at least).
+    all_snapshots = _zfs_list(type_="snapshot")
+    apt_snapshots = filter(is_apt_snapshot, all_snapshots)
+    return apt_snapshots
+
+
 def directories_for_package(pkg):
     """Return a list of the directories a package is modifying."""
     directories = set()
@@ -439,6 +459,25 @@ def get_files(stream):
     return directories
 
 
+def list_old(period):
+    old_snaps = []
+    limit = datetime.datetime.now() - datetime.timedelta(days=period)
+    for snapshot in list_apt_snapshots():
+        # The last 15 characters are the timestamp (YYYY-MM-DD-hhmm)
+        timestamp_string = snapshot[-15:]
+        # The argument to strptime must be a string, not bytes (and it'll
+        # almost always be bytes at this point).
+        if isinstance(timestamp_string, bytes):
+            timestamp_string = timestamp_string.decode(default_encoding)
+        snap_timestamp = datetime.datetime.strptime(
+            timestamp_string,
+            SNAPSHOT_TIMESTAMP_FORMAT
+        )
+        if snap_timestamp < limit:
+            old_snaps.append(snapshot)
+    return old_snaps
+
+
 def get_config():
     parser = argparse.ArgumentParser(
         description=(
@@ -461,6 +500,30 @@ def get_config():
         "--verbose",
         action="store_true",
         help="Enable verbose logging."
+    )
+    parser.add_argument(
+        "--purge-old",
+        action="store_true",
+        dest="purge",
+        help="Purge stale snapshots made by this tool."
+    )
+    parser.add_argument(
+        "--list-old",
+        action="store_false",
+        dest="list_old",
+        help="List stale snapshots made by this tool."
+    )
+    parser.add_argument(
+        "--old-period",
+        action="store",
+        default=30,
+        dest="old_period",
+        help=(
+            "Consider snapshots (made by this tool) older than this many days "
+            "as stale."
+        ),
+        metavar="DAYS",
+        type=int
     )
     args = parser.parse_args()
     return args
@@ -501,6 +564,20 @@ def main(source):
         log.info("Creating ZFS snapshot '%s'",
                  snapshot.decode(default_encoding))
         create_snapshot(snapshot)
+    # Cleanup (if needed)
+    if args.list_old or args.purge:
+        old_snaps = list_old(args.old_period)
+    if args.list_old:
+        # Add a blank entry at the beginning to prefix the listing so the first
+        # entry is formatted like the others.
+        snap_list = b"\n\t".join([b""] + old_snaps)
+        message = "Old {} snapshots:{}".format(
+            pathlib.Path(sys.argv[0]).name,
+            snap_list.decode(default_encoding)
+        )
+        log.info(message)
+    if args.purge:
+        destroy_snapshots(*old_snaps)
 
 
 if __name__ == "__main__":
