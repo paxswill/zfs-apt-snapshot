@@ -49,6 +49,9 @@ else:
     _lzc_get_props = getattr(zfs, "lzc_get_props", None)
     if not zfs.is_supported(_lzc_get_props):
         _lzc_get_props = None
+    _lzc_destroy_snaps = getattr(zfs, "lzc_get_props", None)
+    if not zfs.is_supported(_lzc_destroy_snaps):
+        _lzc_destroy_snaps = None
 
 
 # Get the current default locale early on
@@ -204,6 +207,33 @@ else:
                 name = name.decode(default_encoding)
                 properties[name] = value
             return properties
+
+
+if _lzc_destroy_snaps is not None:
+    @ensure_bytes
+    def destroy_snapshots(*names):
+        log.info(
+            "Destroying snapshots:\n\t%s",
+            "\n\t".join(n.decode(default_encoding) for n in names)
+        )
+        _lzc_destroy_snaps(names)
+else:
+    @ensure_bytes
+    def destroy_snapshots(*names):
+        log.info(
+            "Destroying snapshots:\n\t%s",
+            "\n\t".join(n.decode(default_encoding) for n in names)
+        )
+        base_args = [b"zfs", b"destroy"]
+        for name in names:
+            args = base_args + [name]
+            log_external(args)
+            ret = subprocess.run(
+                args,
+                check=True,
+                stderr=subprocess.STDOUT,
+                stdout=subprocess.PIPE
+            )
 
 
 @ensure_bytes
