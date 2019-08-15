@@ -103,6 +103,10 @@ class ZFSListError(APTSnapshotError): pass
 class ZFSGetPropertiesError(APTSnapshotError): pass
 
 
+SNAPSHOT_PREFIX = "zfs-apt-snap"
+SNAPSHOT_TIMESTAMP_FORMAT = "%Y-%m-%d-%H%M"
+
+
 def ensure_bytes(func):
     """Helper decorator that ensures the name argument to a function is bytes.
     """
@@ -481,8 +485,8 @@ def main(source):
         enabled_filesystems = filesystems
 
     # Choose a name for the snapshot
-    timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d-%H%M")
-    snapshot_name = "zfs-apt-snap_{}".format(timestamp)
+    timestamp = datetime.datetime.utcnow().strftime(SNAPSHOT_TIMESTAMP_FORMAT)
+    snapshot_name = "{}_{}".format(SNAPSHOT_PREFIX, timestamp)
     # This mess of decode()+encode() is because there isn't a format() method
     # for bytes.
     filesystem_snapshots = [
