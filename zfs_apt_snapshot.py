@@ -62,6 +62,13 @@ logging.basicConfig(
 )
 
 
+def log_external(args):
+    log.debug(
+        "Running external command `%s`",
+        b" ".join(args).decode(default_encoding)
+    )
+
+
 class APTSnapshotError(Exception):
 
     def __init__(self, *args, subprocess_return=None, **kwargs):
@@ -123,10 +130,7 @@ else:
     def create_snapshot(name):
         if isinstance(name, str):
             args = [b"zfs", b"snapshot", name],
-            log.debug(
-                "Running external command `%s`",
-                b" ".join(args).decode(default_encoding)
-            )
+            log_external(args)
             ret = subprocess.run(
                 args,
                 check=False,
@@ -170,10 +174,7 @@ else:
             b"all",
             name,
         ]
-        log.debug(
-            "Running external command `%s`",
-            b" ".join(args).decode(default_encoding)
-        )
+        log_external(args)
         ret = subprocess.run(
             args,
             check=False,
