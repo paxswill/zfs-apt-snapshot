@@ -2,4 +2,7 @@
 Dpkg::Tools::options::/usr/local/sbin/zfs-apt-snapshot::Version "3";
 Dpkg::Pre-Install-Pkgs {
 	"/usr/local/sbin/zfs-apt-snapshot";
+// If you want to clean up old snapshots (by default 30 days), add --purge to
+// the end, like below.
+//	"/usr/local/sbin/zfs-apt-snapshot --purge";
 };
