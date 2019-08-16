@@ -12,7 +12,7 @@ available (or at least packaged) for ZFS on Linux >=0.8.0, so if you're using
 your distro's packages, the bindings are only available for Debian >=buster and
 \*buntu >=eoan. To install (skip the ZFS bindings if they're not available):
 
-    sudo apt install python-apt python3-zfs
+    sudo apt install python-apt python3-pyzfs
 
 After that, copy the script to `/usr/local/bin` and add the APT config file:
 
