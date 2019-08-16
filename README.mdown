@@ -1,0 +1,26 @@
+Python script for automatically creating ZFS snapshots when
+installing/removing/upgrading packages through APT. The snapshots are only
+created on the filesystems that are going to be affected by the changes,
+minimizing the number of snapshots (and possible wasted space).
+
+# Install
+
+There's no install script (or package) yet, so it's all manual for now. There's
+two hard external dependencies, Python 3 and the Python APT bindings. If
+available, the Python ZFS bindings are also used. The ZFS bindings are only
+available (or at least packaged) for ZFS on Linux >=0.8.0, so if you're using
+your distro's packages, the bindings are only available for Debian >=buster and
+\*buntu >=eoan. To install (skip the ZFS bindings if they're not available):
+
+    sudo apt install python-apt python3-zfs
+
+After that, copy the script to `/usr/local/bin` and add the APT config file:
+
+    sudo mkdir -p /usr/local/bin
+    sudo cp ./zfs_apt_snapshot.py /usr/local/bin/zfs-apt-snapshot
+    sudo chmod +x /usr/local/bin/zfs-apt-snapshot
+    sudo cp ./90apt-zfs-snapshot /etc/apt/apt.conf.d/
+
+You can check out the available options with `zfs-apt-snapshot --help`. I'd
+recommend editing `/etc/apt/apt.conf.d/90apt-zfs-snapshot` to purge old
+snapshots as well (not on by default for safety).
