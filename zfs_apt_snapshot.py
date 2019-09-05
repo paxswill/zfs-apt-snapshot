@@ -567,7 +567,7 @@ def main(source):
     # Cleanup (if needed)
     if args.list_old or args.purge:
         old_snaps = list_old(args.old_period)
-    if args.list_old:
+    if args.list_old and old_snaps:
         # Add a blank entry at the beginning to prefix the listing so the first
         # entry is formatted like the others.
         snap_list = b"\n\t".join([b""] + old_snaps)
@@ -576,7 +576,7 @@ def main(source):
             snap_list.decode(default_encoding)
         )
         log.info(message)
-    if args.purge:
+    if args.purge and old_snaps:
         destroy_snapshots(*old_snaps)
 
 
