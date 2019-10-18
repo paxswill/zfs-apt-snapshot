@@ -13,6 +13,7 @@ Python 3.5.
 """
 
 import argparse
+import ctypes
 import collections
 import datetime
 import enum
@@ -292,9 +293,135 @@ def _zfs_list(*names, type_=None, fields=(b"name",)):
             ]
 
 
+class MountEntry(ctypes.Structure):
+    _fields_ = [
+        ("mnt_fsname", ctypes.c_char_p),
+        ("mnt_dir", ctypes.c_char_p),
+        ("mnt_type", ctypes.c_char_p),
+        ("mnt_opts", ctypes.c_char_p),
+        ("mnt_freq", ctypes.c_int),
+        ("mnt_passno", ctypes.c_int),
+    ]
+
+
+MountEntryPointer = ctypes.POINTER(MountEntry)
+
+
+Filesystem = collections.namedtuple("Filesystem", ["type_", "name"])
+
+
+_libc = None
+
+
+def get_libc():
+    global _libc
+    if _libc is None:
+        # For giggles, we could pass None as the library name (as per
+        # dlopen(3), if the filename is NULL, the main program's handle is
+        # returned), but that's not especially portable (I think), so we're
+        # explicitly requesting libc
+        libc_name = ctypes.util.find_library("c")
+        if libc_name is None:
+            log.error("ERROR: Unable to load libc.")
+            sys.exit(1)
+        _libc = ctypes.CDLL(libc_name)
+        # Set the types for the functions we're going to be using
+        _libc.setmntent.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+        _libc.setmntent.restype = ctypes.c_void_p
+        _libc.getmntent.argtypes = [ctypes.c_void_p]
+        _libc.getmntent.restype = MountEntryPointer
+        _libc.endmntent.argtypes = [ctypes.c_void_p]
+        _libc.endmntent.restype = ctypes.c_int
+    return _libc
+
+
+def list_mounted_filesystems():
+    """Return information on all currently mounted filesystems.
+
+    :rtype: Dict[pathlib.Path: Filesystem]
+    """
+    libc = get_libc()
+    mtab_handle = libc.setmntent(b"/etc/mtab", b"r")
+    filesystems = {}
+    try:
+        entry_ptr = libc.getmntent(mtab_handle)
+        while entry_ptr:
+            entry = entry_ptr.contents
+            mountpoint = pathlib.Path(entry.mnt_dir.decode(default_encoding))
+            fs = Filesystem(
+                entry.mnt_type.decode(default_encoding),
+                entry.mnt_fsname.decode(default_encoding)
+            )
+            filesystems[mountpoint] = fs
+            entry_ptr = libc.getmntent(mtab_handle)
+        return filesystems
+    finally:
+        libc.endmntent(mtab_handle)
+
+
+def list_zfs_volumes():
+    """Map ZFS volumes to block devices.
+
+    :returns: A mapping of device paths to the name of the ZFS volume. A single
+        volume may have multiple paths to it (ex: `/dev/zd0` and
+        `/dev/zvol/pool/volname`). Both paths will have entries in the returned
+        mapping with identical values.
+    :rtype: Dict[pathlib.Path: bytes]
+    """
+    # Start from /dev/zvol, as that's where volume devices live according to
+    # the man page.
+    volumes = {}
+    zvol = pathlib.Path("/dev/zvol")
+    for root, dirs, files in os.walk(zvol):
+        for filename in files:
+            path = pathlib.Path(root, filename)
+            volume_name = str(path.relative_to(zvol))
+            volumes[path] = volume_name
+            if path.is_symlink():
+                resolved = path.resolve()
+                volumes[resolved] = volume_name
+    return volumes
+
+
 def get_filesystems(*paths):
     """Return the names of the ZFS filesystems the given paths exist on."""
-    return _zfs_list(*paths, type_=b"filesystem")
+    mounted_filesystems = list_mounted_filesystems()
+    zfs_volumes = list_zfs_volumes()
+    affected_datasets = set()
+    for path in paths:
+        path = path if isinstance(path, pathlib.Path) else pathlib.Path(path)
+        parent_mountpoint = None
+        for mountpoint, fs in mounted_filesystems.items():
+            try:
+                # This is just as a check that `path` is below `mountpoint`
+                path.relative_to(mountpoint)
+                if parent_mountpoint is None:
+                    parent_mountpoint = mountpoint
+                elif len(parent_mountpoint.parts) < len(mountpoint.parts):
+                    parent_mountpoint = mountpoint
+            except ValueError:
+                pass
+        # parent_mountpoint cannot be None, unless a relative path was given as
+        # an argument (in which case all bets are off, good luck).
+        assert parent_mountpoint is not None
+        fs = mounted_filesystems[parent_mountpoint]
+        if fs.type_ == "zfs":
+            affected_datasets.add(fs.name)
+        else:
+            device_path = pathlib.Path(fs.name)
+            if device_path in zfs_volumes:
+                affected_datasets.add(zfs_volumes[device_path])
+            else:
+                log.warning(
+                    (
+                        "Skipping path '{}' as it is not on a "
+                        "ZFS filesystem."
+                    ).format(path)
+                )
+    return [
+        ds.encode(default_encoding) if isinstance(ds, str) else ds
+        for ds in affected_datasets
+    ]
 
 
 @ensure_bytes
@@ -367,21 +494,7 @@ def filesystems_for_files(files):
     # convert the path list to a queue so we can put things at the end for
     # later processing
     paths = collections.deque(filtered_files)
-    while paths:
-        path = paths.popleft()
-        try:
-            # We need to convert the PurePath to a string for processing by the
-            # ZFS API.
-            filesystem = get_filesystems(str(path))
-            filesystems.update(filesystem)
-        except ZFSListError:
-            # If there's an error, the path probably doesn't exist yet, so find
-            # the filesystem for the parent directory (and so on).
-            if path.parent != path:
-                paths.append(path.parent)
-            else:
-                raise
-    return filesystems
+    return get_filesystems(*paths)
 
 
 def get_files(stream):
