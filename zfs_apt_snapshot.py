@@ -106,7 +106,7 @@ class ZFSGetPropertiesError(APTSnapshotError): pass
 
 SNAPSHOT_PREFIX = "zfs-apt-snap"
 SNAPSHOT_PREFIX_BYTES = SNAPSHOT_PREFIX.encode(default_encoding)
-SNAPSHOT_TIMESTAMP_FORMAT = "%Y-%m-%d-%H%M"
+SNAPSHOT_TIMESTAMP_FORMAT = "%Y-%m-%dT%H%M%S"
 
 
 def ensure_bytes(func):
@@ -596,17 +596,53 @@ def get_files(stream):
 def list_old(period):
     old_snaps = []
     limit = datetime.datetime.now() - datetime.timedelta(days=period)
+    # Build a list of possible formats timestamps could be in
+    timestamp_formats = []
+
+    def drop_tokens(fmt):
+        timestamp_format = fmt
+        while timestamp_format:
+            yield timestamp_format
+            timestamp_format = timestamp_format[:timestamp_format.rfind("%")]
+
+    timestamp_format = SNAPSHOT_TIMESTAMP_FORMAT
+    # Start by dropping the last token off the end
+    timestamp_formats.extend(drop_tokens(SNAPSHOT_TIMESTAMP_FORMAT))
+    # If there's a time separator, try without that, and try with a dash
+    # instead.
+    if "T" in SNAPSHOT_TIMESTAMP_FORMAT:
+        timestamp_formats.extend(
+            drop_tokens(SNAPSHOT_TIMESTAMP_FORMAT.replace("T", ""))
+        )
+        timestamp_formats.extend(
+            drop_tokens(SNAPSHOT_TIMESTAMP_FORMAT.replace("T", "-"))
+        )
+
     for snapshot in list_apt_snapshots():
-        # The last 15 characters are the timestamp (YYYY-MM-DD-hhmm)
-        timestamp_string = snapshot[-15:]
+        snapshot_name = snapshot.rsplit(b"@", 1)[1]
+        # Add one for the underscore separating the prefix from the timestamp
+        timestamp_string = snapshot_name[len(SNAPSHOT_PREFIX_BYTES) + 1:]
+        log.debug("Checking timestamp '%s'", timestamp_string)
         # The argument to strptime must be a string, not bytes (and it'll
         # almost always be bytes at this point).
         if isinstance(timestamp_string, bytes):
             timestamp_string = timestamp_string.decode(default_encoding)
-        snap_timestamp = datetime.datetime.strptime(
-            timestamp_string,
-            SNAPSHOT_TIMESTAMP_FORMAT
-        )
+        snap_timestamp = None
+        for timestamp_format in timestamp_formats:
+            try:
+                snap_timestamp = datetime.datetime.strptime(
+                    timestamp_string,
+                    timestamp_format
+                )
+                break
+            except ValueError:
+                pass
+        else:
+            log.error(
+                "Unable to parse timestamp '%s'",
+                timestamp_string
+            )
+            sys.exit(1)
         if snap_timestamp < limit:
             old_snaps.append(snapshot)
     return old_snaps
