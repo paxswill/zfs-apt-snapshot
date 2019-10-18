@@ -242,10 +242,14 @@ else:
 
 
 @ensure_bytes
-def _zfs_list(*names, type_=None):
-    # kwargs aren't converted by ensure_bytes
+def _zfs_list(*names, type_=None, fields=(b"name",)):
+    # kwargs other than name aren't converted by ensure_bytes
     if isinstance(type_, str):
         type_ = type_.encode(default_encoding)
+    fields = [
+        field.encode(default_encoding) if isinstance(field, str) else field
+        for field in fields
+    ]
 
     valid_types = {b"snapshot", b"filesystem", b"volume", b"bookmark", b"all"}
     if type_ not in valid_types:
@@ -253,7 +257,8 @@ def _zfs_list(*names, type_=None):
             type_.decode(default_encoding)
         ))
 
-    args = [b"zfs", b"list", b"-H", b"-t", type_, b"-o", b"name", *names]
+    field_spec = b",".join(fields)
+    args = [b"zfs", b"list", b"-H", b"-t", type_, b"-o", field_spec, *names]
     log.debug(
         "Running external command `%s`",
         b" ".join(args).decode(default_encoding)
@@ -268,7 +273,23 @@ def _zfs_list(*names, type_=None):
         raise ZFSListError(subprocess_return=ret)
     else:
         # strip() the output to trim trailing newlines
-        return ret.stdout.strip().split(b"\n")
+        rows = ret.stdout.strip().split(b"\n")
+        if len(fields) == 1:
+            # If we only have one field, just return the list of strings
+            return rows
+        else:
+            # Otherwise, return a list of namedtuples for each row.
+            # The namedtuple will have access through the names of each field
+            # as well
+            ListResult = collections.namedtuple(
+                "ListResult",
+                # names have to be str, not bytes
+                [field.decode(default_encoding) for field in fields]
+            )
+            return [
+                ListResult(*row.split(b"\t"))
+                for row in rows
+            ]
 
 
 def get_filesystems(*paths):
